@@ -1,0 +1,246 @@
+---
+title: "股票回测3.0"
+author: "吴宇翀"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    theme: yeti
+---
+
+
+
+本文件未完成
+
+
+
+
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# 规则设置
+
+1. 在原有的预测区间上加入0.5倍的浮动，扩大预测区间成为可能空间。
+1. 
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.pos = 'H', echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(knitr)
+library(ggplot2)
+library(quantmod)
+library(tidyverse)
+library(DT)
+library(riingo)
+
+token = "23df16b0153d591648bac006196f7a9fa380908a"
+riingo_set_token(token)
+
+stock_code = "000001"
+stock_start = "2010-01-01"
+stock_end = "2019-11-06"
+```
+
+```{r}
+BackTest = function(stock_code, stock_start, stock_end, stock_interval = 'daily',
+                    proportion = 0.5, adj = TRUE, 
+                    stop_loss = FALSE, proportion_loss = 0, fix_loss = 0,
+                    take_profit = FALSE, proportion_profit = 0, fix_profit = 0)
+{
+  # Check for the stock_code
+  if(!is_supported_ticker(stock_code))
+  {
+    return("This stock code is invalid")
+  }
+  
+  # Import data
+  dat = riingo_prices(stock_code, start_date = stock_start, end_date = stock_end, resample_frequency = stock_interval)
+  cat(stock_code, stock_interval, "from", stock_start, "to", stock_end, "复权")
+  
+  # Format Changing
+  dat = data.frame(date=index(dat), coredata(dat))
+  names(dat) = c("trade_date", "open", "high", "low", "close", "volume")
+  dat = dat %>%
+    select(trade_date, open, high, low, close)
+  
+  # Data Cleaning
+  dat = filter(dat, open != high | high != low | low != close)
+  dat = dat[complete.cases(dat), ]
+  
+  # Focast
+  pre_high = c(NA, NA)
+  pre_low = c(NA, NA)
+  for(i in 3:nrow(dat))
+  {
+    pre_high = c(pre_high, 2 * dat$high[i-1] - dat$high[i-2])
+    pre_low = c(pre_low, 2 * dat$low[i-1] - dat$low[i-2])
+  }
+  dat = cbind(dat, pre_high, pre_low)
+  
+  # Delete NA
+  dat = dat[-c(1,2),]
+  
+  # Swap high and low in a specific situation
+  for(i in 1:nrow(dat))
+  {
+    if(dat$pre_high[i] < dat$pre_low[i])
+    {
+      swap = dat$pre_high[i]
+      dat$pre_high[i] = dat$pre_low[i]
+      dat$pre_low[i] = swap
+    }
+  }
+  
+  # Change date format
+  dat$trade_date = as.Date(dat$trade_date, "%Y-%m-%d")
+  
+  # Accuracy
+  accuracy = c()
+  for(i in 1:nrow(dat))
+  {
+    if(dat$close[i] <= dat$pre_high[i] & dat$close[i] >= dat$pre_low[i])
+    {
+      accuracy = c(accuracy, "within")
+    }
+    else if(dat$close[i] < dat$pre_low[i])
+    {
+      accuracy = c(accuracy, "over_estimate")
+    }
+    else if(dat$close[i] > dat$pre_high[i])
+    {
+      accuracy = c(accuracy, "under_estimate")
+    }
+  }
+  accuracy = as.factor(accuracy)
+  dat = cbind(dat, accuracy)
+  
+  # Plot: forcast
+  p = ggplot(dat) +
+    geom_line(mapping = aes(x = trade_date, y = close), color = "black") +
+    geom_line(mapping = aes(x = trade_date, y = pre_high), color = "red", linetype = "dashed") +
+    geom_line(mapping = aes(x = trade_date, y = pre_low), color = "blue", linetype = "dashed")
+  
+  # threshold
+  dat = dat %>% 
+    mutate(threshold = pre_low + (pre_high - pre_low) * proportion)
+    
+  # Tactic: bought or not and cost if bought
+  bought = c(FALSE)
+  cost = c(NA)
+  for(i in 2:nrow(dat))
+  {
+    if(dat$close[i-1] < dat$threshold[i])
+    {
+      bought = c(bought, TRUE)
+      cost = c(cost, dat$close[i-1])
+    }
+    else
+    {
+      bought = c(bought, FALSE)
+      cost = c(cost, NA)
+    }
+  }
+  dat = cbind(dat, bought, cost)
+  
+  # Tactic: sell and stop_loss
+  sell = c(NA)
+  for(i in 2:nrow(dat))
+  {
+    if(dat$bought[i] == TRUE)
+    {
+      sell = c(sell, dat$close[i])
+    }
+    else
+    {
+      sell = c(sell, NA)
+    }
+  }
+  dat = cbind(dat, sell)
+  
+  # Tactic: stop_loss
+  if(stop_loss == FALSE)
+  {
+    trigger = NA
+  }
+  if(stop_loss == TRUE)
+  {
+    trigger = c("none")
+    for(i in 2:nrow(dat))
+    {
+      if(dat$bought[i] == TRUE && dat$open[i] < dat$pre_low[i] - proportion_loss * (dat$pre_high[i] - dat$pre_low[i]) - fix_loss * dat$pre_low[i])
+      {
+        trigger = c(trigger, "beginning")
+        dat$sell[i] = dat$open[i]
+      }
+      else if(dat$bought[i] == TRUE && dat$low[i] < dat$pre_low[i] - proportion_loss * (dat$pre_high[i] - dat$pre_low[i]) - fix_loss * dat$pre_low[i])
+      {
+        trigger = c(trigger, "during")
+        dat$sell[i] = dat$pre_low[i]
+      }
+      else if(dat$bought[i] == TRUE)
+      {
+        trigger = c(trigger, "within")
+      }
+      else
+      {
+        trigger = c(trigger, "none")
+      }
+    }
+    trigger = as.factor(trigger)
+    dat = cbind(dat, trigger)
+  }
+  
+  # Margin and Margin rate
+  margin = NA
+  dat = cbind(dat, margin)
+  for(i in 1:nrow(dat))
+  {
+    if(dat$bought[i] == TRUE)
+    {
+      dat$margin[i] = dat$sell[i] - dat$cost[i]
+    }
+  }
+  margin_rate = NA
+  dat = cbind(dat, margin_rate)
+  for(i in 1:nrow(dat))
+  {
+    if(dat$bought[i] == TRUE)
+    {
+      dat$margin_rate[i] = (dat$sell[i] - dat$cost[i]) / dat$cost[i]
+    }
+  }
+  
+  # Plot: Margin
+  dat_margin = dat %>% 
+    filter(bought == TRUE)
+  p_margin = ggplot(dat_margin) +
+    geom_point(mapping = aes(x = trade_date, y = margin_rate)) +
+    geom_abline(slope = 0, intercept = 0, color = "red")
+  
+  # Summary
+  sum_trigger = summary(trigger)
+  margin = sum(dat$margin, na.rm = TRUE)
+  market = dat$close[nrow(dat)] - dat$close[1]
+  sum_margin = data.frame(margin = round(margin, 3),
+                          margin_rate = round(margin / mean(dat$close), 3),
+                          market = market,
+                          market_rate = round(market / mean(dat$close), 3))
+  sum_accuracy = summary(accuracy)
+  
+  # Digits
+  dat$margin = dat$margin %>% 
+    round(3)
+  dat$margin_rate = dat$margin_rate %>% 
+    round(3)
+  
+  # Return
+  outcome = list("data" = dat, "plot" = p, "sum_accuracy" = sum_accuracy, "sum_trigger" = sum_trigger, "sum_margin" = sum_margin, "p_margin" = p_margin)
+  return(outcome)
+}
+```

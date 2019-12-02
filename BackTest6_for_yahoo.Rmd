@@ -1,0 +1,211 @@
+---
+title: "Stock Back Test 6.0"
+author: "Ethan"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    theme: yeti
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.pos = 'H', echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(knitr)
+library(ggplot2)
+library(quantmod)
+library(tidyverse)
+library(DT)
+library(tidyquant)
+```
+
+# Rules
+
+
+```{r}
+BackTest = function(stock_code, stock_start, stock_end, stock_interval = 'daily', 
+                    adj = TRUE)
+{
+  # Import data
+  dat = getSymbols(stock_code, from = stock_start, to = stock_end, 
+                    auto.assign = FALSE, periodicity = stock_interval)
+  cat(stock_code, stock_interval, "from", stock_start, "to", stock_end)
+  
+  # Format Changing
+  dat = data.frame(date=index(dat), coredata(dat))
+  dat = dat[, 1:6]
+  names(dat) = c("date", "open", "high", "low", "close", "volume")
+  
+  # Data Cleaning
+  dat = filter(dat, open != high | high != low | low != close)
+  dat = dat[complete.cases(dat), ]
+  
+  # Change date format
+  dat$date = as.Date(dat$date, "%Y-%m-%d")
+  
+  #
+  for(i in 1:nrow(dat))
+  {
+    
+  }
+}
+```
+
+# 报告
+
+## 各种股票周K表现
+
+```{r}
+stock_start = "2010-01-01"
+stock_end = "2019-11-07"
+stock_code = c("^IXIC", "^GSPC", "^DJI", "^RUT", "600519.SS", "2328.HK", "159901.SZ", "000001.SZ", "600019.SS", "601857.SS", "0941.HK", "0241.HK", "045340.KQ", "0215.HK")
+frame = c()
+for(i in stock_code)
+{
+  list = BackTest(i, stock_start, stock_end, stock_interval = 'weekly')
+  frame = rbind(frame, list$sum_margin)
+}
+sum = apply(frame, 2, mean)
+
+frame %>% 
+  rbind(sum) %>% 
+  cbind(c(stock_code, NA)) %>% 
+  datatable()
+
+```
+
+## 剧烈下跌：周K： 每月表现
+
+```{r}
+stock_code = "000001.SS"
+row = c()
+for(i in 1:8)
+{
+  stock_start = paste0("2018-0", i, "-01")
+  stock_end = paste0("2018-0", i + 1, "-01")
+  list = BackTest(stock_code, stock_start, stock_end, stock_interval = 'weekly')
+  row = rbind(row, list$sum_margin)
+}
+
+frame = cbind(row, c(1:8))
+
+sum = apply(frame, 2, sum)
+
+frame %>% 
+  rbind(sum) %>% 
+  datatable()
+```
+
+## 月K报告
+
+```{r}
+stock_code = "0941.HK"
+stock_start = "2012-01-01"
+stock_end = "2019-11-07"
+list = BackTest(stock_code, stock_start, stock_end, stock_interval = 'monthly')
+```
+
+Summary of margin
+
+```{r}
+datatable(list$sum_margin)
+```
+
+Summary of Stop-loss
+
+```{r}
+tryCatch(list$sum_trigger, error = "no stop_loss")
+```
+
+Plot of margin
+
+```{r}
+list$p_margin
+```
+
+Buy and Sell points
+
+```{r}
+list$p_points
+```
+
+Data
+
+```{r}
+datatable(list$data)
+```
+
+## 周K报告
+
+```{r}
+list = BackTest(stock_code, stock_start, stock_end, stock_interval = 'weekly')
+```
+
+Summary of margin
+
+```{r}
+datatable(list$sum_margin)
+```
+
+Summary of Stop-loss
+
+```{r}
+tryCatch(list$sum_trigger, error = "no stop_loss")
+```
+
+Plot of margin
+
+```{r}
+list$p_margin
+```
+
+Buy and Sell points
+
+```{r}
+list$p_points
+```
+
+Data
+
+```{r}
+datatable(list$data)
+```
+
+## 日K报告
+
+```{r}
+list = BackTest(stock_code, stock_start, stock_end, stock_interval = 'daily')
+```
+
+Summary of margin
+
+```{r}
+datatable(list$sum_margin)
+```
+
+Summary of Stop-loss
+
+```{r}
+tryCatch(list$sum_trigger, error = "no stop_loss")
+```
+
+Plot of margin
+
+```{r}
+list$p_margin
+```
+
+Buy and Sell points
+
+```{r}
+list$p_points
+```
+
+Data
+
+```{r}
+datatable(list$data)
+```
+

@@ -1,0 +1,360 @@
+---
+title: "Stock Back Test 5.0"
+author: "Ethan"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    theme: yeti
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.pos = 'H', echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(knitr)
+library(ggplot2)
+library(quantmod)
+library(tidyverse)
+library(DT)
+library(tidyquant)
+```
+
+# Rules
+
+If the open price higher than the lowest price of the last trade date, then buy it and sell at the close price unless the price hits the stop loss price, which is the same as the lowest price of the last trade date.
+
+```{r}
+BackTest = function(stock_code, stock_start, stock_end, stock_interval = 'daily', 
+                    adj = TRUE, fix = TRUE, method = "beginning", fix_loss = 0.03, loss_margin = 0)
+{
+  # Import data
+  dat <- getSymbols(stock_code, from = stock_start, to = stock_end, 
+                    auto.assign=FALSE, periodicity = stock_interval)
+  cat(stock_code, stock_interval, "from", stock_start, "to", stock_end)
+  
+  # Format Changing
+  dat = data.frame(date=index(dat), coredata(dat))
+  dat = dat[, 1:6]
+  names(dat) = c("trade_date", "open", "high", "low", "close", "volume")
+  
+  # Data Cleaning
+  dat = filter(dat, open != high | high != low | low != close)
+  dat = dat[complete.cases(dat), ]
+  
+  # Change date format
+  dat$trade_date = as.Date(dat$trade_date, "%Y-%m-%d")
+  
+  # Tactic: bought or not and cost if bought
+  bought = c(FALSE)
+  cost = c(NA)
+  if(method == "beginning")
+  {
+    for(i in 2:nrow(dat))
+    {
+      if(dat$open[i] > dat$low[i-1])
+      {
+        bought = c(bought, TRUE)
+        cost = c(cost, dat$open[i])
+      }
+      else
+      {
+        bought = c(bought, FALSE)
+        cost = c(cost, NA)
+      }
+    }
+  }
+  if(method == "end")
+  {
+    for(i in 2:nrow(dat))
+    {
+      bought = c(bought, TRUE)
+      cost = c(cost, dat$close[i-1])
+    }
+  }
+  dat = cbind(dat, bought, cost)
+  
+  # Tactic: sell price
+  sell = c(NA)
+  for(i in 2:nrow(dat))
+  {
+    if(dat$bought[i] == TRUE)
+    {
+      sell = c(sell, dat$close[i])
+    }
+    else
+    {
+      sell = c(sell, NA)
+    }
+  }
+  dat = cbind(dat, sell)
+  
+  # Tactic: trigger
+  trigger = c("none")
+  if(fix == FALSE)
+  {
+    for(i in 2:nrow(dat))
+    {
+      if(dat$bought[i] == TRUE & dat$cost[i] <= dat$low[i-1] + (dat$high[i-1] - dat$low[i-1]) * 0.5 & dat$low[i] < dat$low[i-1] * (1 - loss_margin))
+      {
+        trigger = c(trigger, "stop_loss_low_point")
+        dat$sell[i] = min(dat$low[i-1] * (1 - loss_margin), dat$open[i])
+      }
+      else if(dat$bought[i] == TRUE & dat$cost[i] > dat$low[i-1] + (dat$high[i-1] - dat$low[i-1]) * 0.5 & dat$low[i] < (dat$low[i-1] + (dat$high[i-1] - dat$low[i-1]) * 0.5) * (1 - loss_margin))
+      {
+        trigger = c(trigger, "stop_loss_middle_point")
+        dat$sell[i] = min((dat$low[i-1] + (dat$high[i-1] - dat$low[i-1]) * 0.5) * (1 - loss_margin), dat$open[i])
+      }      
+      else if(dat$bought[i] == TRUE)
+      {
+        trigger = c(trigger, "within")
+      }
+      else
+      {
+        trigger = c(trigger, "none")
+      }
+    }
+  }
+  if(fix == TRUE)
+  {
+    for(i in 2:nrow(dat))
+    {
+      if(dat$bought[i] == TRUE & dat$open[i] < dat$cost[i] * (1 - fix_loss))
+      {
+        trigger = c(trigger, "stop_loss_fix_open")
+        dat$sell[i] = dat$open[i]       
+      }
+      else if(dat$bought[i] == TRUE & dat$low[i] < dat$cost[i] * (1 - fix_loss))
+      {
+        trigger = c(trigger, "stop_loss_fix")
+        dat$sell[i] = dat$cost[i] * (1 - fix_loss)    
+      }
+      else if(dat$bought[i] == TRUE)
+      {
+        trigger = c(trigger, "within")
+      }
+      else
+      {
+        trigger = c(trigger, "none")
+      }
+    }
+  }
+  trigger = as.factor(trigger)
+  dat = cbind(dat, trigger)
+  
+  # Margin and Margin rate
+  margin = NA
+  dat = cbind(dat, margin)
+  for(i in 1:nrow(dat))
+  {
+    if(dat$bought[i] == TRUE)
+    {
+      dat$margin[i] = dat$sell[i] - dat$cost[i]
+    }
+  }
+  margin_rate = NA
+  dat = cbind(dat, margin_rate)
+  for(i in 1:nrow(dat))
+  {
+    if(dat$bought[i] == TRUE)
+    {
+      dat$margin_rate[i] = (dat$sell[i] - dat$cost[i]) / dat$cost[i]
+    }
+  }
+  
+  # Plot: Margin
+  dat_margin = dat %>% 
+    filter(bought == TRUE)
+  p_margin = ggplot(dat_margin) +
+    geom_point(mapping = aes(x = trade_date, y = margin_rate)) +
+    geom_abline(slope = 0, intercept = 0, color = "red")
+  
+  # Plot: buy and sell points
+  p_points = dat %>% 
+    ggplot(aes(x = 1:nrow(dat), y = close)) +
+    geom_candlestick(aes(open = open, high = high, low = low, close = close), 
+                     colour_up = "tomato", colour_down = "green",
+                     fill_up = "tomato", fill_down = "green") +
+    geom_point(aes(y = cost), shape = 3) +
+    geom_point(aes(y = sell), shape = 4) +
+    theme_tq()
+
+  # Summary
+  sum_trigger = summary(trigger)
+  margin = sum(dat$margin, na.rm = TRUE)
+  market = dat$close[nrow(dat)] - dat$close[1]
+  sum_margin = data.frame(margin = round(margin, 3),
+                          margin_rate = round(margin / mean(dat$close), 3),
+                          market = market,
+                          market_rate = round(market / mean(dat$close), 3))
+  
+  # Digits
+  dat$margin = dat$margin %>% 
+    round(3)
+  dat$margin_rate = dat$margin_rate %>% 
+    round(3)
+  
+  # Return
+  outcome = list("data" = dat, "sum_trigger" = sum_trigger, "sum_margin" = sum_margin, 
+                 "p_margin" = p_margin, "p_points" = p_points)
+  return(outcome)
+}
+```
+
+# 报告
+
+## 各种股票周K表现
+
+```{r}
+stock_start = "2010-01-01"
+stock_end = "2019-11-07"
+stock_code = c("^IXIC", "^GSPC", "^DJI", "^RUT", "600519.SS", "2328.HK", "159901.SZ", "000001.SZ", "600019.SS", "601857.SS", "0941.HK", "0241.HK", "045340.KQ", "0215.HK")
+frame = c()
+for(i in stock_code)
+{
+  list = BackTest(i, stock_start, stock_end, stock_interval = 'weekly')
+  frame = rbind(frame, list$sum_margin)
+}
+sum = apply(frame, 2, mean)
+
+frame %>% 
+  rbind(sum) %>% 
+  cbind(c(stock_code, NA)) %>% 
+  datatable()
+
+```
+
+## 剧烈下跌：周K： 每月表现
+
+```{r}
+stock_code = "000001.SS"
+row = c()
+for(i in 1:8)
+{
+  stock_start = paste0("2018-0", i, "-01")
+  stock_end = paste0("2018-0", i + 1, "-01")
+  list = BackTest(stock_code, stock_start, stock_end, stock_interval = 'weekly')
+  row = rbind(row, list$sum_margin)
+}
+
+frame = cbind(row, c(1:8))
+
+sum = apply(frame, 2, sum)
+
+frame %>% 
+  rbind(sum) %>% 
+  datatable()
+```
+
+## 月K报告
+
+```{r}
+stock_code = "0941.HK"
+stock_start = "2012-01-01"
+stock_end = "2019-11-07"
+list = BackTest(stock_code, stock_start, stock_end, stock_interval = 'monthly')
+```
+
+Summary of margin
+
+```{r}
+datatable(list$sum_margin)
+```
+
+Summary of Stop-loss
+
+```{r}
+tryCatch(list$sum_trigger, error = "no stop_loss")
+```
+
+Plot of margin
+
+```{r}
+list$p_margin
+```
+
+Buy and Sell points
+
+```{r}
+list$p_points
+```
+
+Data
+
+```{r}
+datatable(list$data)
+```
+
+## 周K报告
+
+```{r}
+list = BackTest(stock_code, stock_start, stock_end, stock_interval = 'weekly')
+```
+
+Summary of margin
+
+```{r}
+datatable(list$sum_margin)
+```
+
+Summary of Stop-loss
+
+```{r}
+tryCatch(list$sum_trigger, error = "no stop_loss")
+```
+
+Plot of margin
+
+```{r}
+list$p_margin
+```
+
+Buy and Sell points
+
+```{r}
+list$p_points
+```
+
+Data
+
+```{r}
+datatable(list$data)
+```
+
+## 日K报告
+
+```{r}
+list = BackTest(stock_code, stock_start, stock_end, stock_interval = 'daily')
+```
+
+Summary of margin
+
+```{r}
+datatable(list$sum_margin)
+```
+
+Summary of Stop-loss
+
+```{r}
+tryCatch(list$sum_trigger, error = "no stop_loss")
+```
+
+Plot of margin
+
+```{r}
+list$p_margin
+```
+
+Buy and Sell points
+
+```{r}
+list$p_points
+```
+
+Data
+
+```{r}
+datatable(list$data)
+```
+

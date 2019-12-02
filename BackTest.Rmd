@@ -1,0 +1,126 @@
+---
+title: "股票回测"
+author: "吴宇翀"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    theme: yeti
+---
+
+问题：
+
+最好按照时间顺序排布
+
+没有除权
+
+优化阈值
+
+设置止损
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.pos = 'H', echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(knitr)
+library(ggplot2)
+library(quantmod)
+library(tidyverse)
+library(Tushare)
+```
+
+# Tushare
+
+```{r}
+token = "b7ac41ebc8f9ec8f772a17fd378f9f2f93b9d810a961f7fee794b8b8"
+api = pro_api(token)
+
+dat = api(api_name = 'daily', ts_code='603797.SH', start_date='20180718', end_date='201905')
+
+forecast_low = dat$close
+forecast_high = dat$close
+threshold = dat$close
+dat = cbind(dat, forecast_high, forecast_low, threshold)
+
+for(i in 1:(nrow(dat) - 2))
+{
+  dat[i, 12] = 2 * dat[i+1, 4] - dat[i+2, 4]
+  dat[i, 13] = 2 * dat[i+1, 5] - dat[i+2, 5]
+  dat[i, 14] = (dat[i, 12] + dat[i, 13]) / 2 - abs(dat[i, 12] - dat[i, 13]) / 4
+}
+
+buy_date = c()
+buy_price = c()
+sell_price = c()
+
+for(i in 2:(nrow(dat) - 2))
+{
+  # i is buy_date
+  if(dat[i,6] < dat[i-1, 14])
+  {
+    buy_date = c(buy_date, dat[i,2])
+    buy_price = c(buy_price, dat[i,6])
+    sell_price = c(sell_price, dat[i-1, 6])
+  }
+  else
+  {
+    buy_date = c(buy_date, dat[i,2])
+    buy_price = c(buy_price, 0)
+    sell_price = c(sell_price, 0)
+  }
+}
+
+trade = data.frame(buy_date, buy_price, sell_price)
+
+trade = trade %>%
+  mutate(margin = sell_price - buy_price)
+
+sum(trade$margin)
+
+ggplot(trade, mapping = aes(x = 1:nrow(trade), y = margin)) +
+  geom_point()
+
+win = 0
+lose = 0
+void = 0
+
+for(i in 1:nrow(trade))
+{
+  if(trade[i,4] == 0)
+  {
+    void = void + 1
+  }
+  if(trade[i,4] > 0)
+  {
+    win = win + 1
+  }
+  if(trade[i,4] < 0)
+  {
+    lose = lose + 1
+  }
+}
+
+win
+lose
+void
+
+arrange = dat %>%
+  select(close, forecast_high, forecast_low)
+
+ggplot(arrange) +
+  geom_line(mapping = aes(x = 1:nrow(arrange), y = close), color = "blue") +
+  geom_line(mapping = aes(x = 1:nrow(arrange), y = forecast_high), color = "red") +
+  geom_line(mapping = aes(x = 1:nrow(arrange), y = forecast_low), color = "green")
+
+arrange
+
+trade
+
+dat$close[1] - dat$close[nrow(dat)]
+```
+
+
+
+
+
