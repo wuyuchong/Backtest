@@ -25,7 +25,7 @@ library(tidyquant)
 
 
 ```{r}
-BackTest = function(stock_code, stock_start, stock_end, stock_interval = 'daily', 
+BackTest = function(stock_code, stock_start, stock_end, stock_interval = 'weekly', 
                     adj = TRUE)
 {
   # Import data
@@ -35,8 +35,8 @@ BackTest = function(stock_code, stock_start, stock_end, stock_interval = 'daily'
   
   # Format Changing
   dat = data.frame(date=index(dat), coredata(dat))
-  dat = dat[, 1:6]
-  names(dat) = c("date", "open", "high", "low", "close", "volume")
+  dat = dat[, 1:5]
+  names(dat) = c("date", "open", "high", "low", "close")
   
   # Data Cleaning
   dat = filter(dat, open != high | high != low | low != close)
@@ -45,9 +45,82 @@ BackTest = function(stock_code, stock_start, stock_end, stock_interval = 'daily'
   # Change date format
   dat$date = as.Date(dat$date, "%Y-%m-%d")
   
-  #
+  # judge: high or low to be the first
+  dat = dat %>% 
+    mutate(first = high) %>%
+    mutate(second = low)
   for(i in 1:nrow(dat))
   {
+    if(dat$open[i] < dat$close[i])
+    {
+      dat$first[i] = dat$low[i]
+      dat$second[i] = dat$high[i]
+    }
+  }
+
+  # Tactic
+  dire = "flat"
+  first = "none"
+  trade_date = NULL
+  trade_cost = NULL
+  trade_sell = NULL
+  for(i in 2:nrow(dat))
+  {
+    ## open
+    {
+      if(dire == "flat")
+      {
+        if(dat$open[i] < dat$low[i-1])
+        {
+          dire = "short"
+          kind = "trend"
+          trade_date = c(trade_date, dat$date[i])
+          trade_dire = dire
+          trade_kind = kind
+          trade_cost = c(trade_date, dat$open[i])
+        }
+        if(dat$open[i] > dat$high[i-1])
+        {
+          dire = "long"
+          kind = "trend"
+          trade_date = c(trade_date, dat$date[i])
+          trade_dire = dire
+          trade_kind = kind
+          trade_cost = c(trade_date, dat$open[i])
+        }
+      }
+      if(dire == "long")
+      {
+        if(dat$open[i] < dat$low[i-1])
+        {
+          dire = "flat"
+          trade_sell = c(trade_sell, dat$open[i])
+        }
+        if(dat$open[i] > dat$high[i-1] & kind == "fluct")
+        {
+          dire = "flat"
+          trade_sell = c(trade_sell, dat$open[i])
+        }
+      }
+      if(dire == "short")
+      {
+        if(dat$open[i] < dat$low[i-1] & kind == "fluct")
+        {
+          dire = "flat"
+          trade_sell = c(trade_sell, dat$open[i])
+        }
+        if(dat$open[i] > dat$high[i-1])
+        {
+          dire = "flat"
+          trade_sell = c(trade_sell, dat$open[i])
+        }  
+      }
+    }
+    
+    ## first
+    
+    ## second
+    
     
   }
 }
