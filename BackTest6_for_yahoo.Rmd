@@ -330,7 +330,7 @@ BackTest = function(stock_code, stock_start, stock_end,
     round(3)
   
   # Return
-  outcome = list("data" = dat, "sum_trigger" = sum_trigger, "sum_margin" = sum_margin, 
+  outcome = list("data" = dat, "sum_margin" = sum_margin, 
                  "p_margin" = p_margin, "p_points" = p_points)
   return(outcome)
 }
@@ -396,12 +396,6 @@ Summary of margin
 datatable(list$sum_margin)
 ```
 
-Summary of Stop-loss
-
-```{r}
-tryCatch(list$sum_trigger, error = "no stop_loss")
-```
-
 Plot of margin
 
 ```{r}
@@ -432,12 +426,6 @@ Summary of margin
 datatable(list$sum_margin)
 ```
 
-Summary of Stop-loss
-
-```{r}
-tryCatch(list$sum_trigger, error = "no stop_loss")
-```
-
 Plot of margin
 
 ```{r}
@@ -466,12 +454,6 @@ Summary of margin
 
 ```{r}
 datatable(list$sum_margin)
-```
-
-Summary of Stop-loss
-
-```{r}
-tryCatch(list$sum_trigger, error = "no stop_loss")
 ```
 
 Plot of margin
