@@ -189,6 +189,7 @@ BackTest = function(stock_code, stock_start, stock_end,
           dire = "flat"
           trade_sell = c(trade_sell, dat$high[i-1])
         }
+      }
       #--> middle down
       if(dat$first[i] >= dat$low[i-1] & dat$first[i] <= dat$high[i-1] & dat$second[i] < dat$low[i-1])
       {
@@ -211,6 +212,7 @@ BackTest = function(stock_code, stock_start, stock_end,
           dire = "flat"
           trade_sell = c(trade_sell, dat$low[i-1])
         }
+      }
       #--> middle up
       if(dat$first[i] >= dat$low[i-1] & dat$first[i] <= dat$high[i-1] & dat$second[i] > dat$low[i-1])
       {
@@ -234,7 +236,47 @@ BackTest = function(stock_code, stock_start, stock_end,
           trade_sell = c(trade_sell, dat$low[i-1])
         }
       }
-
+      #--> up down
+      if(dat$first[i] > dat$high[i-1] & dat$second[i] < dat$down[i-1])
+      {
+        if(dire == "flat")
+        {
+          dire = "short"
+          kind = "fluct"
+          trade_date = c(trade_date, dat$date[i])
+          trade_dire = dire
+          trade_kind = kind
+          trade_cost = c(trade_date, dat$high[i-1])
+          dire = "flat"
+          trade_sell = c(trade_sell, dat$low[i-1])
+        }
+        if(dire == "long")
+        {
+          dire = "flat"
+          trade_sell = c(trade_sell, dat$low[i-1])
+        }
+        if(dire == "short")
+        {
+          return("impossible")
+        }
+      }  
+      #--> up middle
+      if(dat$first[i] > dat$high[i-1] & dat$second[i] >= dat$low[i-1] & dat$second[i] <= dat$high[i-1])
+      {
+        if(dire == "flat")
+        {
+          dire = "short"
+          kind = "fluct"
+          trade_date = c(trade_date, dat$date[i])
+          trade_dire = dire
+          trade_kind = kind
+          trade_cost = c(trade_date, dat$high[i-1])
+        }
+        if(dire == "short")
+        {
+          return("impossible")
+        }
+      }
     }
   }
 }
