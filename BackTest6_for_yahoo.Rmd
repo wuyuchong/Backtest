@@ -324,9 +324,9 @@ BackTest = function(stock_code, stock_start, stock_end,
                           market_rate = round(market / mean(dat$close), 3))
   
   # Digits
-  dat$margin = dat$margin %>% 
+  trade$margin = trade$margin %>% 
     round(3)
-  dat$margin_rate = dat$margin_rate %>% 
+  trade$margin_rate = trade$margin_rate %>% 
     round(3)
   
   # Return
