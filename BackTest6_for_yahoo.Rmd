@@ -279,6 +279,28 @@ BackTest = function(stock_code, stock_start, stock_end,
       }
     }
   }
+  trade = data.frame(trade_date, trade_dire, trade_kind, trade_cost, trade_sell)
+  
+  # Margin and Margin rate
+  margin = NULL
+  margin_rate = NULL
+  for(i in 1:nrow(trade))
+  {
+    if(trade_dire[i] == "long")
+    {
+      margin = c(margin, trade_sell[i] - trade_cost[i])
+      margin_rate = c(margin_rate, (trade_sell[i] - trade_cost[i]) / trade_cost[i])
+    }
+    if(trade_dire[i] == "short")
+    {
+      margin = c(margin, trade_cost[i] - trade_sell[i])
+      margin_rate = c(margin_rate, (trade_cost[i] - trade_sell[i]) / trade_cost[i])
+    }
+  }
+  trade = cbind(trade, margin, margin_rate)
+  colnames(trade) = c("date", "dire", "kind", "cost", "sell", "margin", "margin_rate")
+  
+  }
 }
 ```
 
