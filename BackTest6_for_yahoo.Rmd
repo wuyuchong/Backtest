@@ -237,7 +237,7 @@ BackTest = function(stock_code, stock_start, stock_end,
         }
       }
       #--> up down
-      if(dat$first[i] > dat$high[i-1] & dat$second[i] < dat$down[i-1])
+      if(dat$first[i] > dat$high[i-1] & dat$second[i] < dat$low[i-1])
       {
         if(dire == "flat")
         {
@@ -298,9 +298,41 @@ BackTest = function(stock_code, stock_start, stock_end,
     }
   }
   trade = cbind(trade, margin, margin_rate)
-  colnames(trade) = c("date", "dire", "kind", "cost", "sell", "margin", "margin_rate")
+  colnames(trade) = c("date", "direction", "kind", "cost", "sell", "margin", "margin_rate")
   
-  }
+  # Plot: Margin
+  p_margin = ggplot(trade) +
+    geom_point(mapping = aes(x = date, y = margin_rate)) +
+    geom_abline(slope = 0, intercept = 0, color = "red")
+  
+  # Plot: buy and sell points
+  p_points = dat %>% 
+    ggplot(aes(x = date, y = close)) +
+    geom_candlestick(aes(open = open, high = high, low = low, close = close), 
+                     colour_up = "tomato", colour_down = "green",
+                     fill_up = "tomato", fill_down = "green") +
+    geom_point(data = trade, mapping = aes(x = date, y = cost), shape = 3) +
+    geom_point(data = trade, mapping = aes(x = date, y = sell), shape = 4) +
+    theme_tq()
+  
+  # Summary
+  margin = sum(trade$margin, na.rm = TRUE)
+  market = dat$close[nrow(dat)] - dat$close[1]
+  sum_margin = data.frame(margin = round(margin, 3),
+                          margin_rate = round(margin / mean(dat$close), 3),
+                          market = market,
+                          market_rate = round(market / mean(dat$close), 3))
+  
+  # Digits
+  dat$margin = dat$margin %>% 
+    round(3)
+  dat$margin_rate = dat$margin_rate %>% 
+    round(3)
+  
+  # Return
+  outcome = list("data" = dat, "sum_trigger" = sum_trigger, "sum_margin" = sum_margin, 
+                 "p_margin" = p_margin, "p_points" = p_points)
+  return(outcome)
 }
 ```
 
