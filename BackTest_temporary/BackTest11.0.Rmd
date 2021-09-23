@@ -1,0 +1,541 @@
+---
+title: "Stock Back Test 11.0 Former 2"
+author: "Ethan"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    theme: yeti
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.pos = 'H', echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(knitr)
+library(ggplot2)
+library(quantmod)
+library(tidyverse)
+library(DT)
+library(tidyquant)
+```
+
+# Rules
+
+```{r}
+BackTest = function(stock_code, stock_start, stock_end, fee = 0.002,
+                    stock_interval = 'daily', adj = TRUE, permit = FALSE)
+{
+  # Import data
+  dat = getSymbols(stock_code, from = stock_start, to = stock_end, adjusted = adj, adj = adj,
+                    auto.assign = FALSE, periodicity = stock_interval)
+  cat(stock_code, stock_interval, "from", stock_start, "to", stock_end)
+  
+  # Format Changing
+  dat = data.frame(date=index(dat), coredata(dat))
+  dat = dat[, 1:5]
+  names(dat) = c("date", "open", "high", "low", "close")
+  
+  # Data Cleaning
+  dat = filter(dat, open != high | high != low | low != close)
+  dat = dat[complete.cases(dat), ]
+  
+  # Change date format
+  dat$date = 1:nrow(dat)
+  
+  # Judge every bar
+  dat = dat %>% 
+    cbind(judge = rep(NA, nrow(dat)))
+  for(i in 2:nrow(dat))
+  {
+    if(dat$high[i] > dat$high[i-1] & dat$low[i] > dat$low[i-1])
+    {
+      dat$judge[i] = "up"
+    } else if(dat$high[i] < dat$high[i-1] & dat$low[i] < dat$low[i-1])
+    {
+      dat$judge[i] = "down"
+    } else if(dat$low[i] <= dat$low[i-1] & dat$high[i] >= dat$high[i-1] & dat$close[i] > dat$open[i])
+    {
+      dat$judge[i] = "down_up"
+    } else if(dat$low[i] <= dat$low[i-1] & dat$high[i] >= dat$high[i-1] & dat$close[i] < dat$open[i])
+    {
+      dat$judge[i] = "up_down"
+    } else
+    {
+      dat$judge[i] = "fluc"
+    }
+  }
+
+  # Tactic
+  dire = "flat"
+  first = "none"
+  kind = "fluc"
+  trade_date = NULL
+  trade_kind = NULL
+  trade_cost = NULL
+  trade_sell = NULL
+  trade_dire = NULL
+  trade_sell_date = NULL
+  for(i in 4:nrow(dat))
+  {
+    if((dat$judge[i-2] == "down" & dat$judge[i-1] == "up") | (dat$judge[i-2] == "up" & dat$judge[i-1] == "down"))
+    {
+      kind = "fluc" # ------
+      if(dat$judge[i] == "up" | dat$judge[i] == "up_down")
+      {
+        if(dire == "long")
+        {
+          dire = "flat"
+          trade_sell = c(trade_sell, max(dat$high[i-1], dat$open[i]))
+          trade_sell_date = c(trade_sell_date, dat$date[i])
+          dire = "short"
+          trade_date = c(trade_date, dat$date[i])
+          trade_dire = c(trade_dire, dire)
+          trade_kind = c(trade_kind, kind)
+          trade_cost = c(trade_cost, max(dat$high[i-1], dat$open[i]))
+        } else if(dire == "short")
+        {
+          next
+        } else
+        {
+          dire = "short"
+          trade_date = c(trade_date, dat$date[i])
+          trade_dire = c(trade_dire, dire)
+          trade_kind = c(trade_kind, kind)
+          trade_cost = c(trade_cost, max(dat$high[i-1], dat$open[i]))
+        }
+      } else if(dat$judge[i] == "down" | dat$judge[i] == "down_up")
+      {
+        if(dire == "long")
+        {
+          next
+        } else if(dire == "short")
+        {
+          dire = "flat"
+          trade_sell = c(trade_sell, min(dat$low[i-1], dat$open[i]))
+          trade_sell_date = c(trade_sell_date, dat$date[i])
+          dire = "long"
+          trade_date = c(trade_date, dat$date[i])
+          trade_dire = c(trade_dire, dire)
+          trade_kind = c(trade_kind, kind)
+          trade_cost = c(trade_cost, min(dat$low[i-1], dat$open[i]))
+        } else
+        {
+          dire = "long"
+          trade_date = c(trade_date, dat$date[i])
+          trade_dire = c(trade_dire, dire)
+          trade_kind = c(trade_kind, kind)
+          trade_cost = c(trade_cost, min(dat$low[i-1], dat$open[i]))
+        }
+      } else
+      {
+        next
+      }
+    } else
+    {
+      kind = "trend"
+      if(dat$judge[i] == "up" | dat$judge[i] == "up_down")
+      {
+        if(dire == "long")
+        {
+          next 
+        } else if(dire == "short")
+        {
+          dire = "flat"
+          trade_sell = c(trade_sell, max(dat$high[i-1], dat$open[i]))
+          trade_sell_date = c(trade_sell_date, dat$date[i])
+          dire = "long"
+          trade_date = c(trade_date, dat$date[i])
+          trade_dire = c(trade_dire, dire)
+          trade_kind = c(trade_kind, kind)
+          trade_cost = c(trade_cost, max(dat$high[i-1], dat$open[i]))
+        } else
+        {
+          dire = "long"
+          trade_date = c(trade_date, dat$date[i])
+          trade_dire = c(trade_dire, dire)
+          trade_kind = c(trade_kind, kind)
+          trade_cost = c(trade_cost, max(dat$high[i-1], dat$open[i]))
+        }
+      } else if(dat$judge[i] == "down" | dat$judge[i] == "down_up")
+      {
+        if(dire == "short")
+        {
+          next
+        } else if(dire == "long")
+        {
+          dire = "flat"
+          trade_sell = c(trade_sell, min(dat$low[i-1], dat$open[i]))
+          trade_sell_date = c(trade_sell_date, dat$date[i])
+          dire = "short"
+          trade_date = c(trade_date, dat$date[i])
+          trade_dire = c(trade_dire, dire)
+          trade_kind = c(trade_kind, kind)
+          trade_cost = c(trade_cost, min(dat$low[i-1], dat$open[i]))
+        } else
+        {
+          dire = "short"
+          trade_date = c(trade_date, dat$date[i])
+          trade_dire = c(trade_dire, dire)
+          trade_kind = c(trade_kind, kind)
+          trade_cost = c(trade_cost, min(dat$low[i-1], dat$open[i]))
+        }
+      } else
+      {
+        next
+      }
+    }
+  }
+
+  # Trade information
+  if(length(trade_sell) < length(trade_cost))
+  {
+    trade_sell = c(trade_sell, trade_cost[length(trade_cost)])
+    trade_sell_date = c(trade_sell_date, trade_date[length(trade_date)])
+  }
+  trade = data.frame(trade_date, trade_dire, trade_cost, trade_sell, trade_sell_date)
+  
+  # Margin and Margin rate
+  margin = NULL
+  margin_rate = NULL
+  for(i in 1:nrow(trade))
+  {
+    if(is.null(trade_dire))
+    {
+      break
+    }
+    if(trade_dire[i] == "long")
+    {
+      margin = c(margin, trade_sell[i] - trade_cost[i])
+      margin_rate = c(margin_rate, (trade_sell[i] - trade_cost[i]) / trade_cost[i])
+    }
+    if(trade_dire[i] == "short" & permit == TRUE)
+    {
+      margin = c(margin, trade_cost[i] - trade_sell[i])
+      margin_rate = c(margin_rate, (trade_cost[i] - trade_sell[i]) / trade_cost[i])
+    }
+    if(trade_dire[i] == "short" & permit == FALSE)
+    {
+      margin = c(margin, 0)
+      margin_rate = c(margin_rate, 0)
+    }
+  }
+  trade = cbind(trade, margin, margin_rate)
+  colnames(trade) = c("date", "direction", "cost", "sell", "sell_date", "margin", "margin_rate")
+  
+  # Permit and method
+  if(permit == FALSE)
+  {
+    trade = trade %>% 
+      filter(direction == "long")
+  }
+  
+  # Plot: Margin
+  p_margin = ggplot(trade) +
+    geom_point(mapping = aes(x = sell_date, y = margin_rate)) +
+    geom_abline(slope = 0, intercept = fee, color = "blue")
+  
+  # Plot: buy and sell points
+  p_points = dat %>% 
+    ggplot(aes(x = date, y = close)) +
+    geom_candlestick(aes(open = open, high = high, low = low, close = close), 
+                     colour_up = "tomato", colour_down = "green",
+                     fill_up = "tomato", fill_down = "green") +
+    geom_point(data = subset(trade, direction == "long"), mapping = aes(x = date, y = cost), shape = 3) +
+    geom_point(data = subset(trade, direction == "short"), mapping = aes(x = date, y = cost), shape = 4) +
+    geom_point(data = trade, mapping = aes(x = sell_date, y = sell), shape = 5) +
+    theme_tq()
+  
+  # Compound
+  for(i in 1:nrow(trade))
+  {
+    if(i == 1)
+    {
+      compound = 1 * (1 + trade$margin_rate[1] - fee)
+    }
+    if(i == 2)
+    {
+      compound = c(compound, compound * (1 + trade$margin_rate[2] - fee))
+    }
+    if(i > 2)
+    {
+      compound = c(compound, compound[i-1] * (1 + trade$margin_rate[i] - fee))
+    }
+  }
+  
+  # Plot: Compound
+  p_compound = data.frame(index = 1:length(compound), 
+                          compound = compound) %>%
+    ggplot() +
+    geom_line(aes(x = index, y = compound))
+  
+  # Summary
+  margin = sum(trade$margin, na.rm = TRUE)
+  market = dat$close[nrow(dat)] - dat$close[1]
+  sum_margin = data.frame(margin = round(margin, 2),
+                          market = round(market, 2),
+                          margin_rate = round(margin / mean(dat$close), 2),
+                          market_rate = round(market / dat$close[1], 2),
+                          margin_compound = round(compound[length(compound)], 2),
+                          market_compound = round(dat$close[nrow(dat)] / dat$close[1],2))
+  
+  # Digits
+  trade$margin = trade$margin %>% 
+    round(3)
+  trade$margin_rate = trade$margin_rate %>% 
+    round(3)
+  
+  # Return
+  outcome = list("data" = dat, "sum_margin" = sum_margin, "trade" = trade,
+                 "p_margin" = p_margin, "p_points" = p_points, "p_compound" = p_compound)
+  return(outcome)
+}
+```
+
+```{r}
+stock_start = "2019-01-01"
+stock_end = "2019-12-31"
+```
+
+# 市场报告
+
+```{r}
+stock_code = c("QQQ", "SPY", "TLt", "GDX", "^IXIC", "^GSPC", "^DJI", "^RUT", "AAPL", "MMM", "ABT", "ABBV", "ABMD", "ACN", "600519.SS", "000002.SZ", "159901.SZ", "600019.SS", "601857.SS", "0941.HK", "2328.HK", "0241.HK", "0215.HK")
+```
+
+## 周K表现
+
+```{r}
+frame = c()
+for(i in stock_code)
+{
+  list = BackTest(i, stock_start, stock_end, stock_interval = 'weekly')
+  frame = rbind(frame, list$sum_margin)
+}
+sum = apply(frame, 2, mean)
+median = apply(frame, 2, median)
+
+frame %>% 
+  rbind(sum, median) %>% 
+  cbind(c(stock_code, "sum", "median")) %>% 
+  datatable()
+```
+
+## 日K表现
+
+```{r}
+frame = c()
+for(i in stock_code)
+{
+  list = BackTest(i, stock_start, stock_end, stock_interval = 'daily')
+  frame = rbind(frame, list$sum_margin)
+}
+sum = apply(frame, 2, mean)
+median = apply(frame, 2, median)
+
+frame %>% 
+  rbind(sum, median) %>% 
+  cbind(c(stock_code, "sum", "median")) %>% 
+  datatable()
+```
+
+# SP500 报告
+
+```{r}
+code = read.csv("SP500.csv", header = TRUE, stringsAsFactors = FALSE)
+```
+
+## 周K表现
+
+```{r}
+frame = c()
+stock_code = code$Symbol[30:40]
+for(i in stock_code)
+{
+  list = BackTest(i, stock_start, stock_end, stock_interval = 'weekly')
+  frame = rbind(frame, list$sum_margin)
+}
+sum = apply(frame, 2, mean)
+median = apply(frame, 2, median)
+
+frame %>% 
+  rbind(sum, median) %>% 
+  cbind(c(stock_code, "sum", "median")) %>% 
+  datatable()
+```
+
+## 日K表现
+
+```{r}
+frame = c()
+stock_code = code$Symbol[30:40]
+for(i in stock_code)
+{
+  list = BackTest(i, stock_start, stock_end, stock_interval = 'daily')
+  frame = rbind(frame, list$sum_margin)
+}
+sum = apply(frame, 2, mean)
+median = apply(frame, 2, median)
+
+frame %>% 
+  rbind(sum, median) %>% 
+  cbind(c(stock_code, "sum", "median")) %>% 
+  datatable()
+```
+
+# ETF报告
+
+```{r}
+stock_code = c("510900.SS", "159920.SZ", "513100.SS", "513500.SS", "159954.SZ", "513030.SS")
+```
+
+## ETF月K表现
+
+```{r}
+frame = c()
+for(i in stock_code)
+{
+  list = BackTest(i, stock_start, stock_end, stock_interval = 'monthly')
+  frame = rbind(frame, list$sum_margin)
+}
+sum = apply(frame, 2, mean)
+median = apply(frame, 2, median)
+
+frame %>% 
+  rbind(sum, median) %>% 
+  cbind(c(stock_code, "sum", "median")) %>% 
+  datatable()
+```
+
+## ETF周K表现
+
+```{r}
+frame = c()
+for(i in stock_code)
+{
+  list = BackTest(i, stock_start, stock_end, stock_interval = 'weekly')
+  frame = rbind(frame, list$sum_margin)
+}
+sum = apply(frame, 2, mean)
+median = apply(frame, 2, median)
+
+frame %>% 
+  rbind(sum, median) %>% 
+  cbind(c(stock_code, "sum", "median")) %>% 
+  datatable()
+```
+
+## ETF日K表现
+
+```{r}
+frame = c()
+for(i in stock_code)
+{
+  list = BackTest(i, stock_start, stock_end, stock_interval = 'daily')
+  frame = rbind(frame, list$sum_margin)
+}
+sum = apply(frame, 2, mean)
+median = apply(frame, 2, median)
+
+frame %>% 
+  rbind(sum, median) %>% 
+  cbind(c(stock_code, "sum", "median")) %>% 
+  datatable()
+```
+
+# 单一股报告
+
+```{r}
+stock_code = "2328.HK"
+```
+
+## 月K报告
+
+```{r}
+list = BackTest(stock_code, stock_start, stock_end, stock_interval = 'monthly')
+```
+
+Summary of margin
+
+```{r}
+datatable(list$sum_margin)
+```
+
+Plot of margin
+
+```{r}
+list$p_margin
+```
+
+Compound
+
+```{r}
+list$p_compound
+```
+
+Buy and Sell points
+
+```{r}
+list$p_points
+```
+
+## 周K报告
+
+```{r}
+list = BackTest(stock_code, stock_start, stock_end, stock_interval = 'weekly')
+```
+
+Summary of margin
+
+```{r}
+datatable(list$sum_margin)
+```
+
+Plot of margin
+
+```{r}
+list$p_margin
+```
+
+Compound
+
+```{r}
+list$p_compound
+```
+
+Buy and Sell points
+
+```{r}
+list$p_points
+```
+
+## 日K报告
+
+```{r}
+list = BackTest(stock_code, stock_start, stock_end, stock_interval = 'daily')
+```
+
+Summary of margin
+
+```{r}
+datatable(list$sum_margin)
+```
+
+Plot of margin
+
+```{r}
+list$p_margin
+```
+
+Compound
+
+```{r}
+list$p_compound
+```
+
+Buy and Sell points
+
+```{r}
+list$p_points
+```

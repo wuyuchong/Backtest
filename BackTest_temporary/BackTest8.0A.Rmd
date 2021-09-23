@@ -1,0 +1,349 @@
+---
+title: "Stock Back Test 8.0 趋势"
+author: "Ethan"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    theme: yeti
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.pos = 'H', echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(knitr)
+library(ggplot2)
+library(quantmod)
+library(tidyverse)
+library(DT)
+library(tidyquant)
+```
+
+# Rules
+
+T+0
+
+趋势系统
+
+```{r}
+BackTest = function(stock_code, stock_start, stock_end, fee = 0.002,
+                    stock_interval = 'daily', adj = TRUE, permit = TRUE)
+{
+  # Import data
+  dat = getSymbols(stock_code, from = stock_start, to = stock_end, adjusted = adj, adj = adj,
+                   auto.assign = FALSE, periodicity = stock_interval)
+  cat(stock_code, stock_interval, "from", stock_start, "to", stock_end)
+  
+  # Format Changing
+  dat = data.frame(date=index(dat), coredata(dat))
+  dat = dat[, 1:5]
+  names(dat) = c("date", "open", "high", "low", "close")
+  
+  # Data Cleaning
+  dat = filter(dat, open != high | high != low | low != close)
+  dat = dat[complete.cases(dat), ]
+  
+  # Change date format
+  dat$date = 1:nrow(dat)
+  
+  # Tactic
+  dire = "flat"
+  trade_date = NULL
+  trade_cost = NULL
+  trade_sell = NULL
+  trade_dire = NULL
+  trade_sell_date = NULL
+  for(i in 2:nrow(dat))
+  {
+    if(dire == "flat")
+    {
+      if(dat$low[i] > dat$low[i-1] & dat$high[i] >= dat$high[i-1])
+      {
+        dire = "long"
+        trade_dire = c(trade_dire, dire)
+        trade_cost = c(trade_cost, dat$high[i-1])
+        trade_date = c(trade_date, dat$date[i])
+      }
+      if(dat$low[i] <= dat$low[i-1] & dat$high[i] < dat$high[i-1] & permit == TRUE)
+      {
+        dire = "short"
+        trade_dire = c(trade_dire, dire)
+        trade_cost = c(trade_cost, dat$low[i-1])
+        trade_date = c(trade_date, dat$date[i])
+      }
+    }
+    if(dire == "long")
+    {
+      if(dat$low[i] <= dat$low[i-1] & dat$open[i] > dat$low[i-1])
+      {
+        dire = "flat"
+        trade_sell_date = c(trade_sell_date, dat$date[i])
+        trade_sell = c(trade_sell, dat$low[i-1])
+      }
+      if(dat$low[i] <= dat$low[i-1] & dat$open[i] <= dat$low[i-1])
+      {
+        dire = "flat"
+        trade_sell_date = c(trade_sell_date, dat$date[i])
+        trade_sell = c(trade_sell, dat$open[i])
+      }
+    }
+    if(dire == "short")
+    {
+      if(dat$high[i] >= dat$high[i-1] & dat$open[i] < dat$high[i-1])
+      {
+        dire = "flat"
+        trade_sell_date = c(trade_sell_date, dat$date[i])
+        trade_sell = c(trade_sell, dat$high[i-1])
+      }
+      if(dat$high[i] >= dat$high[i-1] & dat$open[i] >= dat$high[i-1])
+      {
+        dire = "flat"
+        trade_sell_date = c(trade_sell_date, dat$date[i])
+        trade_sell = c(trade_sell, dat$open[i])
+      }
+    }
+  }
+  
+  # Trade information
+  if(length(trade_sell) < length(trade_cost))
+  {
+    trade_sell = c(trade_sell, trade_cost[length(trade_cost)])
+    trade_sell_date = c(trade_sell_date, trade_date[length(trade_date)])
+  }
+  trade = data.frame(trade_date, trade_dire, trade_cost, trade_sell, trade_sell_date)
+  
+  # Margin and Margin rate
+  margin = NULL
+  margin_rate = NULL
+  for(i in 1:nrow(trade))
+  {
+    if(trade_dire[i] == "long")
+    {
+      margin = c(margin, trade_sell[i] - trade_cost[i])
+      margin_rate = c(margin_rate, (trade_sell[i] - trade_cost[i]) / trade_cost[i])
+    }
+    if(trade_dire[i] == "short" & permit == TRUE)
+    {
+      margin = c(margin, trade_cost[i] - trade_sell[i])
+      margin_rate = c(margin_rate, (trade_cost[i] - trade_sell[i]) / trade_cost[i])
+    }
+    if(trade_dire[i] == "short" & permit == FALSE)
+    {
+      print("error")
+      margin = c(margin, 0)
+      margin_rate = c(margin_rate, 0)
+    }
+  }
+  trade = cbind(trade, margin, margin_rate)
+  colnames(trade) = c("date", "direction", "cost", "sell", "sell_date", "margin", "margin_rate")
+  
+  # Permit and method
+  if(permit == FALSE)
+  {
+    trade = trade %>% 
+      filter(direction == "long")
+  }
+  
+  # Plot: Margin
+  p_margin = ggplot(trade) +
+    geom_point(mapping = aes(x = sell_date, y = margin_rate)) +
+    geom_abline(slope = 0, intercept = fee, color = "blue")
+  
+  # Plot: buy and sell points
+  p_points = dat %>% 
+    ggplot(aes(x = date, y = close)) +
+    geom_candlestick(aes(open = open, high = high, low = low, close = close), 
+                     colour_up = "tomato", colour_down = "green",
+                     fill_up = "tomato", fill_down = "green") +
+    geom_point(data = trade, mapping = aes(x = date, y = cost), shape = 3) +
+    geom_point(data = trade, mapping = aes(x = sell_date, y = sell), shape = 4) +
+    theme_tq()
+  
+  # Compound
+  for(i in 1:nrow(trade))
+  {
+    if(i == 1)
+    {
+      compound = 1 * (1 + trade$margin_rate[1] - fee)
+    }
+    if(i == 2)
+    {
+      compound = c(compound, compound * (1 + trade$margin_rate[2] - fee))
+    }
+    if(i > 2)
+    {
+      compound = c(compound, compound[i-1] * (1 + trade$margin_rate[i] - fee))
+    }
+  }
+  
+  # Plot: Compound
+  p_compound = data.frame(index = 1:length(compound), 
+                          compound = compound) %>%
+    ggplot() +
+    geom_line(aes(x = index, y = compound))
+  
+  # Summary
+  margin = sum(trade$margin, na.rm = TRUE)
+  market = dat$close[nrow(dat)] - dat$close[1]
+  sum_margin = data.frame(margin = round(margin, 2),
+                          margin_rate = round(margin / mean(dat$close), 2),
+                          compound = round(compound[length(compound)], 2),
+                          market = round(market, 2),
+                          market_rate = round(market / dat$close[1], 2))
+  
+  # Digits
+  trade$margin = trade$margin %>% 
+    round(3)
+  trade$margin_rate = trade$margin_rate %>% 
+    round(3)
+  
+  # Return
+  outcome = list("data" = dat, "sum_margin" = sum_margin, "trade" = trade,
+                 "p_margin" = p_margin, "p_points" = p_points, "p_compound" = p_compound)
+  return(outcome)
+}
+```
+
+# 报告
+
+```{r}
+stock_start = "2017-01-01"
+stock_end = "2017-12-31"
+```
+
+## 各种股票日K表现
+
+```{r}
+stock_code = c("QQQ", "SPY", "TLt", "GDX", "^IXIC", "^GSPC", "^DJI", "^RUT", "AAPL", "MMM", "ABT", "ABBV", "ABMD", "ACN", "600519.SS", "000002.SZ", "159901.SZ", "600019.SS", "601857.SS", "0941.HK", "2328.HK", "0241.HK", "0215.HK")
+frame = c()
+for(i in stock_code)
+{
+  list = BackTest(i, stock_start, stock_end, stock_interval = 'daily')
+  frame = rbind(frame, list$sum_margin)
+}
+sum = apply(frame, 2, mean)
+median = apply(frame, 2, median)
+
+frame %>% 
+  rbind(sum, median) %>% 
+  cbind(c(stock_code, "sum", "median")) %>% 
+  datatable()
+```
+
+
+## SP500 日K表现
+
+```{r}
+code = read.csv("SP500.csv", header = TRUE, stringsAsFactors = FALSE)
+frame = c()
+stock_code = code$Symbol[30:40]
+for(i in stock_code)
+{
+  list = BackTest(i, stock_start, stock_end, stock_interval = 'daily')
+  frame = rbind(frame, list$sum_margin)
+}
+sum = apply(frame, 2, mean)
+median = apply(frame, 2, median)
+
+frame %>% 
+  rbind(sum, median) %>% 
+  cbind(c(stock_code, "sum", "median")) %>% 
+  datatable()
+```
+
+## 月K报告
+
+```{r}
+stock_code = "0941.HK"
+list = BackTest(stock_code, stock_start, stock_end, stock_interval = 'monthly')
+```
+
+Summary of margin
+
+```{r}
+datatable(list$sum_margin)
+```
+
+Plot of margin
+
+```{r}
+list$p_margin
+```
+
+Compound
+
+```{r}
+list$p_compound
+```
+
+Buy and Sell points
+
+```{r}
+list$p_points
+```
+
+## 周K报告
+
+```{r}
+list = BackTest(stock_code, stock_start, stock_end, stock_interval = 'weekly')
+```
+
+Summary of margin
+
+```{r}
+datatable(list$sum_margin)
+```
+
+Plot of margin
+
+```{r}
+list$p_margin
+```
+
+Compound
+
+```{r}
+list$p_compound
+```
+
+Buy and Sell points
+
+```{r}
+list$p_points
+```
+
+## 日K报告
+
+```{r}
+list = BackTest(stock_code, stock_start, stock_end, stock_interval = 'daily')
+```
+
+Summary of margin
+
+```{r}
+datatable(list$sum_margin)
+```
+
+Plot of margin
+
+```{r}
+list$p_margin
+```
+
+Compound
+
+```{r}
+list$p_compound
+```
+
+Buy and Sell points
+
+```{r}
+list$p_points
+```
+
+
+
+

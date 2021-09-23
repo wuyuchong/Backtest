@@ -1,0 +1,79 @@
+---
+title: "Thread1.0"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    theme: yeti
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.pos = 'H', echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(knitr)
+library(ggplot2)
+library(quantmod)
+library(tidyverse)
+library(DT)
+library(tidyquant)
+```
+
+```{r}
+BackTest = function(stock_code, stock_start, stock_end,
+                    stock_interval = 'daily', adj = TRUE, permit = FALSE)
+{
+  # Import data
+  dat = getSymbols(stock_code, from = stock_start, to = stock_end, adjusted = adj, adj = adj,
+                    auto.assign = FALSE, periodicity = stock_interval)
+  cat(stock_code, stock_interval, "from", stock_start, "to", stock_end)
+  
+  # Format Changing
+  dat = data.frame(date=index(dat), coredata(dat))
+  dat = dat[, 1:5]
+  names(dat) = c("date", "open", "high", "low", "close")
+  
+  # Data Cleaning
+  dat = filter(dat, open != high | high != low | low != close)
+  dat = dat[complete.cases(dat), ]
+  
+  # Change date format
+  dat$date = 1:nrow(dat)
+  
+  # Make it a thread
+  thr = NULL
+  group = NULL
+  for(i in 1:nrow(dat))
+  {
+    thr = c(thr,dat$open[i])
+    group = c(group, "open")
+    thr = c(thr,dat$close[i])
+    group = c(group, "close")
+  }
+  index = 1:length(thr)
+  table = data.frame(index, thr, group)
+  
+  # Plot
+  p = table %>% 
+    ggplot(mapping = aes(x = index, y = thr)) +
+      geom_point(aes(color = group)) +
+      geom_line()
+  
+  outcome = list("plot" = p)
+  return(outcome)
+}
+```
+
+```{r}
+stock_start = "2015-01-01"
+stock_end = "2019-12-31"
+stock_code = c("000001.SZ", "000002.SZ")
+for(i in stock_code)
+{
+  list = BackTest(i, stock_start, stock_end, stock_interval = 'daily')
+  print(list$p)
+}
+```
+
+
